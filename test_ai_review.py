@@ -12,7 +12,7 @@ CONTENTS = {"encoding": "base64", "content": base64.b64encode(SOURCE.encode()).d
 
 
 class AIReviewTest(unittest.TestCase):
-    def run_review(self, line, head="abc"):
+    def run_review(self, line, head="abc", confirmed=True):
         response = Mock()
         response.json.return_value = {"message": {"content": json.dumps({"findings": [{
             "path": "demo.py",
@@ -22,10 +22,15 @@ class AIReviewTest(unittest.TestCase):
             "fix": "Handle an empty list before dividing",
         }]})}}
         github = Mock(side_effect=[FILES, CONTENTS, {"head": {"sha": head}}, {}])
-        with patch("ai_reviewer.post", return_value=response) as ollama:
+        verdict = Mock()
+        verdict.json.return_value = {"message": {"content": json.dumps({
+            "trace": "Check whether the input reaches the division.",
+            "confirmed": confirmed,
+        })}}
+        with patch("ai_reviewer.post", side_effect=[response, verdict]) as ollama:
             review(event, github, model="local-test")
         github.assert_any_call("GET", "/repos/demo/repo/contents/demo.py", params={"ref": "abc"})
-        prompt = json.loads(ollama.call_args.kwargs["json"]["messages"][1]["content"])
+        prompt = json.loads(ollama.call_args_list[0].kwargs["json"]["messages"][1]["content"])
         self.assertEqual(prompt[0]["added_lines"], [1, 2])
         self.assertIn("1: def average(values):", prompt[0]["source"])
         return github
@@ -44,3 +49,7 @@ class AIReviewTest(unittest.TestCase):
     def test_ai_comment_on_stale_commit_is_discarded(self):
         github = self.run_review(2, head="new")
         self.assertEqual(github.call_count, 3)
+
+    def test_unconfirmed_finding_is_discarded(self):
+        github = self.run_review(2, confirmed=False)
+        self.assertEqual(github.call_count, 2)
