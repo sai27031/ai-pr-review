@@ -6,6 +6,8 @@ import re
 import time
 from pathlib import Path
 
+logger = logging.getLogger("uvicorn.error.reviewer")
+
 
 def verified(secret, raw, signature):
     expected = "sha256=" + hmac.new(secret.encode(), raw, hashlib.sha256).hexdigest()
@@ -63,8 +65,13 @@ def review(event, request, model=None):
         from ai_reviewer import review_with_ollama
 
         comment = review_with_ollama(model, head, repository, candidates, request)
-    if comment and request("GET", endpoint)["head"]["sha"] == head:
-        request("POST", endpoint + "/comments", json=dict(commit_id=head, **comment))
+    if not comment:
+        return
+    if request("GET", endpoint)["head"]["sha"] != head:
+        logger.info("Skipped posting because the head of PR #%s changed", event["number"])
+        return
+    request("POST", endpoint + "/comments", json=dict(commit_id=head, **comment))
+    logger.info("Posted inline review comment to PR #%s", event["number"])
 
 
 def github_review(event):
@@ -89,7 +96,8 @@ def github_review(event):
 
 
 def background_review(event):
+    logger.info("Starting review of PR #%s (%s)", event["number"], event["action"])
     try:
         github_review(event)
     except Exception:
-        logging.getLogger(__name__).exception("Pull request review failed")
+        logger.exception("Pull request review failed")

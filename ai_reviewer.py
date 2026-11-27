@@ -9,7 +9,7 @@ from urllib.parse import quote
 
 from requests import HTTPError, post
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("uvicorn.error.ai_reviewer")
 FINDING_FIELDS = ("path", "line", "trigger", "impact", "fix")
 SCHEMA = {
     "type": "object",
@@ -93,8 +93,10 @@ def review_with_ollama(model, head, repository, candidates, request):
             break
 
     if not contexts:
+        logger.info("No changed Python function was available for AI review")
         return None
     contexts = contexts[:3]
+    logger.info("Sending %d changed Python function(s) to Ollama model %s", len(contexts), model)
     response = post(
         "http://127.0.0.1:11434/api/chat",
         json={
@@ -115,7 +117,11 @@ def review_with_ollama(model, head, repository, candidates, request):
     except (KeyError, TypeError, ValueError):
         logger.warning("Ollama returned an invalid review response")
         return None
+    if findings == []:
+        logger.info("Ollama returned no finding")
+        return None
     if not isinstance(findings, list) or len(findings) != 1 or not isinstance(findings[0], dict):
+        logger.warning("Ollama returned an unexpected findings structure")
         return None
     finding = findings[0]
     path, line = finding.get("path"), finding.get("line")
@@ -124,6 +130,7 @@ def review_with_ollama(model, head, repository, candidates, request):
         return None
     details = [finding.get(field) for field in FINDING_FIELDS[2:]]
     if any(not isinstance(detail, str) or not 0 < len(detail.strip()) <= 400 for detail in details):
+        logger.warning("Ollama finding was missing a valid trigger, impact or fix")
         return None
     trigger, impact, fix = (detail.strip() for detail in details)
     return dict(path=path, line=line, side="RIGHT",
