@@ -13,9 +13,11 @@ logger = logging.getLogger("uvicorn.error.ai_reviewer")
 FINDING_FIELDS = ("path", "line", "trigger", "impact", "fix")
 SCHEMA = {
     "type": "object",
-    "required": ["findings"],
+    "required": ["example", "outcome", "findings"],
     "additionalProperties": False,
     "properties": {
+        "example": {"type": "string"},
+        "outcome": {"type": "string"},
         "findings": {
             "type": "array",
             "maxItems": 1,
@@ -99,7 +101,10 @@ def review_with_ollama(model, head, repository, candidates, request):
     if not contexts:
         logger.info("No changed Python function was available for AI review")
         return None
-    contexts = contexts[:3]
+    return review_contexts(model, contexts[:3])
+
+
+def review_contexts(model, contexts):
     logger.info("Sending %d changed Python function(s) to Ollama model %s", len(contexts), model)
     response = post(
         "http://127.0.0.1:11434/api/chat",
@@ -109,7 +114,7 @@ def review_with_ollama(model, head, repository, candidates, request):
             "format": SCHEMA,
             "options": {"temperature": 0, "num_ctx": 8192, "num_predict": 350},
             "messages": [
-                {"role": "system", "content": INSTRUCTIONS},
+                {"role": "system", "content": INSTRUCTIONS + "\nGive a concrete boundary input in example and its predicted result or exception in outcome. Output schema: " + json.dumps(SCHEMA)},
                 {"role": "user", "content": json.dumps(contexts)},
             ],
         },
