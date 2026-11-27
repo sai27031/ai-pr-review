@@ -52,3 +52,15 @@ def mean(values):
 ```
 
 When AI review is enabled, the webhook acknowledges the event before the review finishes. Watch the Uvicorn terminal for background errors and allow time for the model to load. The AI comments are best-effort. The background tasks are held in memory. Run the full test suite with `python -m unittest -v` from the virtual environment. The tests simulate model responses.
+
+## Benchmark the AI reviewer
+
+Run this from the project folder while Ollama is running:
+
+```sh
+.venv/bin/python benchmark_review.py --model qwen2.5-coder:3b > /tmp/ai-pr-review-benchmark.json
+```
+
+The benchmark uses 12 synthetic Python changes with six known bugs and six clean edits. It compares a unified diff with three context lines against full changed functions. Both modes use the same model, prompt, validation, and verification pass. The benchmark exercises the AI reviewer locally and requires no GitHub credentials.
+
+The report includes each comment and its duration, along with precision and recall by mode. A hit requires the labeled added line and a match to an expected evidence pattern. A wrong finding on a buggy change counts as both a missed bug and an incorrect finding for precision. Review the actual comments before citing the results. The evidence patterns provide an approximate score, and these fixtures are a small development set.
