@@ -64,3 +64,20 @@ Run this from the project folder while Ollama is running:
 The benchmark uses 12 synthetic Python changes with six known bugs and six clean edits. It compares a unified diff with three context lines against full changed functions. Both modes use the same model, prompt, validation, and verification pass. The benchmark exercises the AI reviewer locally and requires no GitHub credentials.
 
 The report includes each comment and its duration, along with precision and recall by mode. A hit requires the labeled added line and a match to an expected evidence pattern. A wrong finding on a buggy change counts as both a missed bug and an incorrect finding for precision. Review the actual comments before citing the results. The evidence patterns provide an approximate score, and these fixtures are a small development set.
+
+### First benchmark run
+
+The pilot used `qwen2.5-coder:3b` and ran both modes on the same 12 synthetic changes. The automated scorer credited two diff-only comments that gave incorrect failure scenarios. Manual review required the labeled line and an accurate explanation of the failure.
+
+| Metric | Diff only | Full function |
+|---|---:|---:|
+| Automatically credited findings | 3 | 2 |
+| Correct findings after manual review | 1 of 7 comments | 2 of 3 comments |
+| Precision after manual review | 14.3% | 66.7% |
+| Recall after manual review | 16.7% (1 of 6) | 33.3% (2 of 6) |
+| False positives on clean cases | 3 | 1 |
+| Observed mean review time | 8.23 s | 4.18 s |
+
+One diff-only comment claimed the buggy mean returned `None` for an empty list, although it divided by zero. Another found the off-by-one index but blamed an empty list, which the function already guarded. The full-function mode correctly reported the empty-list division and the wrong discount divisor. Both modes missed iterator exhaustion and the first-label lookup failure, and both flagged the clean numeric discount example.
+
+The benchmark covers a small set of synthetic changes. Each case ran diff-only first, so the timing comparison may include order and model warm-up effects. The results describe this run.
