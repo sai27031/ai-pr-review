@@ -1,6 +1,6 @@
 # AI Code Review Bot for GitHub Pull Requests
 
-Milestone 1 connects a signed pull request webhook to an inline comment. The initial reviewer checks added Python lines for a bare except clause. It posts at most one finding per delivery. The LLM reviewer is planned for milestone 2.
+Milestone 1 connects a signed pull request webhook to an inline comment. The initial reviewer checks added Python lines for a bare except clause. It posts at most one finding per delivery. The optional AI reviewer runs through Ollama on your Mac.
 
 ## Run the offline tests
 
@@ -29,4 +29,55 @@ def parse_count(value):
         return 0
 ```
 
-This prototype processes events synchronously. Large reviews may exceed webhook time limits, and redeliveries can duplicate a comment. Queuing and deduplication belong to the reliability milestone. The initial rule uses text matching and can flag matching text in multiline strings.
+Rule-only reviews run synchronously. Large reviews may exceed webhook time limits. Redeliveries can duplicate a comment. Queuing and deduplication belong to the reliability milestone. The initial rule uses text matching and can flag matching text in multiline strings.
+
+## Enable the local AI reviewer
+
+The bot checks for a bare except clause first. With `OLLAMA_MODEL` set, a pull request that passes the initial rule can also get an AI review. The bot retrieves Python source at the PR's head commit, extracts whole functions using Python's AST, and asks Ollama for one correctness finding with a trigger, impact, and fix. It validates the path and line before posting. The AI pass inspects up to five Python files and sends at most three functions to the local model. It skips functions longer than the context limit.
+
+1. In the GitHub App settings, open **Permissions & events**, set **Repository permissions → Contents** to **Read-only**, and save. Approve the updated permission for your installation if GitHub asks.
+2. Start Ollama on this Mac. In a spare terminal run `ollama pull qwen2.5-coder:3b`. If the CLI cannot connect, open the Ollama app or run `ollama serve` in its own terminal first.
+3. In the original bot terminal, stop Uvicorn with Control+C. Keep the GitHub App variables and webhook secret already set in that shell. Then run:
+
+```sh
+export OLLAMA_MODEL=qwen2.5-coder:3b
+python -m uvicorn app:app --port 8000
+```
+
+4. Keep the existing tunnel running. Create a new test PR with the following function and check for a comment that explains what happens when the input is empty.
+
+```python
+def mean(values):
+    return sum(values) / len(values)
+```
+
+When AI review is enabled, the webhook acknowledges the event before the review finishes. Watch the Uvicorn terminal for background errors and allow time for the model to load. The AI comments are best-effort. The background tasks are held in memory. Run the full test suite with `python -m unittest -v` from the virtual environment. The tests simulate model responses.
+
+## Benchmark the AI reviewer
+
+Run this from the project folder while Ollama is running:
+
+```sh
+.venv/bin/python benchmark_review.py --model qwen2.5-coder:3b > /tmp/ai-pr-review-benchmark.json
+```
+
+The benchmark uses 12 synthetic Python changes with six known bugs and six clean edits. It compares a unified diff with three context lines against full changed functions. Both modes use the same model, prompt, validation, and verification pass. The benchmark exercises the AI reviewer locally and requires no GitHub credentials.
+
+The report includes each comment and its duration, along with precision and recall by mode. A hit requires the labeled added line and a match to an expected evidence pattern. A wrong finding on a buggy change counts as both a missed bug and an incorrect finding for precision. Review the actual comments before citing the results. The evidence patterns provide an approximate score, and these fixtures are a small development set.
+
+### First benchmark run
+
+The pilot used `qwen2.5-coder:3b` and ran both modes on the same 12 synthetic changes. The automated scorer credited two diff-only comments that gave incorrect failure scenarios. Manual review required the labeled line and an accurate explanation of the failure.
+
+| Metric | Diff only | Full function |
+|---|---:|---:|
+| Automatically credited findings | 3 | 2 |
+| Correct findings after manual review | 1 of 7 comments | 2 of 3 comments |
+| Precision after manual review | 14.3% | 66.7% |
+| Recall after manual review | 16.7% (1 of 6) | 33.3% (2 of 6) |
+| False positives on clean cases | 3 | 1 |
+| Observed mean review time | 8.23 s | 4.18 s |
+
+One diff-only comment claimed the buggy mean returned `None` for an empty list, although it divided by zero. Another found the off-by-one index but blamed an empty list, which the function already guarded. The full-function mode correctly reported the empty-list division and the wrong discount divisor. Both modes missed iterator exhaustion and the first-label lookup failure, and both flagged the clean numeric discount example.
+
+The benchmark covers a small set of synthetic changes. Each case ran diff-only first, so the timing comparison may include order and model warm-up effects. The results describe this run.
